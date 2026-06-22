@@ -1,0 +1,454 @@
+<script>
+/* ============================================================
+   多読パイプライン クライアントJS
+   サーバー(Code.gs)とは google.script.run でやり取りする。
+   バリデーションのハイライトはサーバーと同じルールを再現し、
+   最終的な可否判定はサーバー(moveCard)が行う。
+   ============================================================ */
+
+var STATE = { statuses: [], records: [], meta: null, byId: {} };
+
+/** 入力フォームの項目定義（表示順。種別はUI生成に使用） */
+var FIELDS = [
+  { key: 'name', type: 'text' },
+  { key: 'grade', type: 'select', from: 'gradeOptions' },
+  { key: 'country', type: 'text' },
+  { key: 'parentEmail', type: 'email' },
+  { key: 'otherEmail', type: 'email' },
+  { key: 'staff', type: 'text' },
+  { key: 'meetingDate', type: 'date' },
+  { key: 'reason', type: 'textarea' },
+  { key: 'level', type: 'select', from: 'levelOptions' },
+  { key: 'notes', type: 'textarea' },
+  { key: 'trialDate', type: 'date' },
+  { key: 'reminderSentDate', type: 'date' },
+  { key: 'stagnationReason', type: 'select', from: 'stagnationOptions' },
+  { key: 'stagnationOther', type: 'text' },
+  { key: 'preMeetingLost', type: 'checkbox' }
+];
+
+var BASE_REQUIRED = ['name', 'grade', 'country', 'parentEmail', 'staff', 'meetingDate', 'reason', 'level'];
+
+/* ---------- 起動 ---------- */
+document.addEventListener('DOMContentLoaded', function () {
+  bindStaticEvents();
+  loadBoard();
+});
+
+function bindStaticEvents() {
+  document.getElementById('btnReload').onclick = loadBoard;
+  document.getElementById('btnNew').onclick = openNewCard;
+  document.getElementById('btnArchive').onclick = openArchive;
+  document.getElementById('modalClose').onclick = closeModal;
+  document.getElementById('modalCancel').onclick = closeModal;
+  document.getElementById('modalSave').onclick = onSave;
+  document.getElementById('targetStatus').onchange = function () { refreshRequired(); };
+  document.getElementById('archClose').onclick = function () { toggle('archOverlay', false); };
+  document.getElementById('archSearch').onclick = doArchiveSearch;
+  document.getElementById('archQuery').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') doArchiveSearch();
+  });
+  document.getElementById('overlay').addEventListener('click', function (e) {
+    if (e.target.id === 'overlay') closeModal();
+  });
+  document.getElementById('archOverlay').addEventListener('click', function (e) {
+    if (e.target.id === 'archOverlay') toggle('archOverlay', false);
+  });
+}
+
+/* ---------- 盤面ロード ---------- */
+function loadBoard() {
+  document.getElementById('board').innerHTML = '<div class="loading">読み込み中…</div>';
+  google.script.run
+    .withSuccessHandler(function (data) {
+      STATE.statuses = data.statuses;
+      STATE.records = data.records;
+      STATE.meta = data.meta;
+      STATE.byId = {};
+      data.records.forEach(function (r) { STATE.byId[r.id] = r; });
+      renderBoard();
+    })
+    .withFailureHandler(function (err) {
+      document.getElementById('board').innerHTML =
+        '<div class="loading">読み込みに失敗しました: ' + escapeHtml(err.message || err) + '</div>';
+    })
+    .getBoard();
+}
+
+function renderBoard() {
+  var board = document.getElementById('board');
+  board.innerHTML = '';
+  STATE.statuses.forEach(function (st) {
+    var cards = STATE.records.filter(function (r) { return r.status === st.id; });
+    var col = document.createElement('div');
+    col.className = 'column';
+    col.innerHTML =
+      '<div class="col-head">' +
+        '<span class="col-no">' + st.no + '</span>' +
+        '<span class="col-name">' + escapeHtml(st.name) + '</span>' +
+        '<span class="col-count">' + cards.length + '</span>' +
+      '</div>' +
+      '<div class="col-body" data-status="' + st.id + '"></div>';
+    board.appendChild(col);
+
+    var body = col.querySelector('.col-body');
+    cards.forEach(function (r) { body.appendChild(renderCard(r)); });
+    setupDropZone(body);
+  });
+}
+
+function renderCard(r) {
+  var el = document.createElement('div');
+  el.className = 'card' + (r.reminderDue ? ' due' : '');
+  el.setAttribute('draggable', 'true');
+  el.dataset.id = r.id;
+
+  var meta = [];
+  if (r.grade) meta.push('<span class="c-tag">' + escapeHtml(r.grade) + '</span>');
+  if (r.level) meta.push('<span class="c-tag">' + escapeHtml(r.level) + '</span>');
+  var dates = [];
+  if (r.trialDate) dates.push('体験 ' + escapeHtml(r.trialDate));
+  if (r.meetingDate) dates.push('面談 ' + escapeHtml(r.meetingDate));
+  if (r.reminderSentDate) dates.push('催促 ' + escapeHtml(r.reminderSentDate));
+
+  el.innerHTML =
+    '<div class="c-name">' + (r.reminderDue ? '<span class="bell">🔔</span>' : '') +
+      escapeHtml(r.name || '(名前未入力)') + '</div>' +
+    (meta.length ? '<div class="c-meta">' + meta.join('') + '</div>' : '') +
+    (dates.length ? '<div class="c-meta">' + dates.map(escapeHtml).join(' ／ ') + '</div>' : '');
+
+  el.addEventListener('click', function () { openModal(r.id); });
+  el.addEventListener('dragstart', function (e) {
+    el.classList.add('dragging');
+    e.dataTransfer.setData('text/plain', r.id);
+    e.dataTransfer.effectAllowed = 'move';
+  });
+  el.addEventListener('dragend', function () { el.classList.remove('dragging'); });
+  return el;
+}
+
+function setupDropZone(body) {
+  body.addEventListener('dragover', function (e) {
+    e.preventDefault();
+    body.classList.add('dragover');
+  });
+  body.addEventListener('dragleave', function () { body.classList.remove('dragover'); });
+  body.addEventListener('drop', function (e) {
+    e.preventDefault();
+    body.classList.remove('dragover');
+    var id = e.dataTransfer.getData('text/plain');
+    var target = body.dataset.status;
+    var rec = STATE.byId[id];
+    if (!rec || rec.status === target) return;
+    openModal(id, target); // 必須入力のためモーダルを開く
+  });
+}
+
+/* ---------- 移動 / 編集モーダル ---------- */
+var CURRENT = null; // 編集中レコードのコピー
+
+function openModal(id, presetTarget) {
+  var rec = STATE.byId[id];
+  if (!rec) return;
+  CURRENT = JSON.parse(JSON.stringify(rec));
+  document.getElementById('modalTitle').textContent = (rec.name || '(名前未入力)');
+  document.getElementById('curStatus').textContent = '現在: ' + statusLabel(rec.status);
+
+  // 移動先セレクト
+  var sel = document.getElementById('targetStatus');
+  sel.innerHTML = '';
+  STATE.statuses.forEach(function (st) {
+    var o = document.createElement('option');
+    o.value = st.id;
+    o.textContent = st.no + ' ' + st.name;
+    sel.appendChild(o);
+  });
+  sel.value = presetTarget || rec.status;
+
+  buildFormFields();
+  fillFormValues(CURRENT);
+  refreshRequired();
+  hideError();
+  toggle('overlay', true);
+}
+
+function openNewCard() {
+  CURRENT = { id: null, status: 's1' };
+  FIELDS.forEach(function (f) { CURRENT[f.key] = f.type === 'checkbox' ? false : ''; });
+  document.getElementById('modalTitle').textContent = '新規カード（①面談未実施に作成）';
+  document.getElementById('curStatus').textContent = '現在: 新規';
+  var sel = document.getElementById('targetStatus');
+  sel.innerHTML = '<option value="s1">1 面談未実施</option>';
+  sel.value = 's1';
+  buildFormFields();
+  fillFormValues(CURRENT);
+  refreshRequired();
+  hideError();
+  toggle('overlay', true);
+}
+
+function buildFormFields() {
+  var wrap = document.getElementById('formFields');
+  wrap.innerHTML = '';
+  var labels = STATE.meta.fieldLabels;
+
+  FIELDS.forEach(function (f) {
+    var fld = document.createElement('div');
+    fld.className = 'field';
+    fld.dataset.key = f.key;
+    var id = 'f_' + f.key;
+    var label = '<label for="' + id + '">' + escapeHtml(labels[f.key] || f.key) +
+                '<span class="req">＊</span></label>';
+    var ctrl = '';
+    if (f.type === 'select') {
+      var opts = STATE.meta[f.from] || [];
+      ctrl = '<select id="' + id + '"><option value=""></option>' +
+        opts.map(function (o) { return '<option value="' + escapeAttr(o) + '">' + escapeHtml(o) + '</option>'; }).join('') +
+        '</select>';
+    } else if (f.type === 'textarea') {
+      ctrl = '<textarea id="' + id + '"></textarea>';
+    } else if (f.type === 'checkbox') {
+      // チェックボックスはレイアウトを変える
+      fld.className = 'field check';
+      fld.dataset.key = f.key;
+      fld.innerHTML = '<input type="checkbox" id="' + id + '">' +
+        '<label for="' + id + '">' + escapeHtml(labels[f.key] || f.key) +
+        '（チェックすると必須項目なしで⑧へ移動できます）</label>';
+      wrap.appendChild(fld);
+      document.getElementById(id).addEventListener('change', function () {
+        CURRENT.preMeetingLost = this.checked;
+        refreshRequired();
+      });
+      return;
+    } else {
+      ctrl = '<input type="' + f.type + '" id="' + id + '">';
+    }
+    fld.innerHTML = label + ctrl;
+    wrap.appendChild(fld);
+
+    var input = document.getElementById(id);
+    input.addEventListener('input', function () { onFieldChange(f.key, input); });
+    input.addEventListener('change', function () { onFieldChange(f.key, input); });
+  });
+
+  // grade を必ずドロップダウン2段目に、などの順序はFIELDS順で担保済み
+  // 「面談前ロスト」フィールドは⑧選択時のみ表示（refreshRequiredで制御）
+  // 「停滞理由その他」も選択時のみ表示
+}
+
+function fillFormValues(rec) {
+  FIELDS.forEach(function (f) {
+    var el = document.getElementById('f_' + f.key);
+    if (!el) return;
+    if (f.type === 'checkbox') el.checked = !!rec[f.key];
+    else el.value = rec[f.key] || '';
+  });
+}
+
+function onFieldChange(key, input) {
+  CURRENT[key] = input.value;
+
+  // ⑤のカードで「停滞の理由」を選んだ瞬間に移動先を⑥へ自動設定
+  if (key === 'stagnationReason' && input.value && CURRENT.status === 's5') {
+    document.getElementById('targetStatus').value = 's6';
+  }
+  refreshRequired();
+}
+
+/** 移動先に応じて必須ハイライト・表示/非表示を更新 */
+function refreshRequired() {
+  var target = document.getElementById('targetStatus').value;
+  var reqKeys = requiredKeysFor(target, CURRENT);
+
+  FIELDS.forEach(function (f) {
+    var fld = document.querySelector('.field[data-key="' + f.key + '"]') ||
+              findCheckField(f.key);
+    if (!fld) return;
+
+    // 表示/非表示の制御
+    if (f.key === 'preMeetingLost') {
+      fld.classList.toggle('hidden', target !== 's8');
+    } else if (f.key === 'stagnationOther') {
+      var showOther = String(CURRENT.stagnationReason || '')
+        .indexOf(STATE.meta.stagnationOtherKey) !== -1;
+      fld.classList.toggle('hidden', !showOther);
+    }
+
+    var isReq = reqKeys.indexOf(f.key) !== -1;
+    fld.classList.toggle('req-now', isReq);
+    fld.classList.remove('missing'); // 入力中はエラー解除
+  });
+}
+
+function findCheckField(key) {
+  var nodes = document.querySelectorAll('#formFields .field');
+  for (var i = 0; i < nodes.length; i++) {
+    if (nodes[i].dataset.key === key) return nodes[i];
+    if (nodes[i].querySelector('#f_' + key)) return nodes[i];
+  }
+  return null;
+}
+
+/** サーバーと同一の必須キー算出 */
+function requiredKeysFor(target, rec) {
+  if (target === 's8') {
+    return rec.preMeetingLost ? [] : BASE_REQUIRED.slice();
+  }
+  var map = STATE.meta.requiredMap;
+  var keys = (map[target] || []).slice();
+  if (keys.indexOf('stagnationReason') !== -1 &&
+      String(rec.stagnationReason || '').indexOf(STATE.meta.stagnationOtherKey) !== -1) {
+    keys.push('stagnationOther');
+  }
+  return keys;
+}
+
+/* ---------- 保存 ---------- */
+function onSave() {
+  var target = document.getElementById('targetStatus').value;
+
+  // フォーム値を収集
+  var data = {};
+  FIELDS.forEach(function (f) {
+    var el = document.getElementById('f_' + f.key);
+    if (!el) return;
+    data[f.key] = (f.type === 'checkbox') ? el.checked : el.value;
+  });
+
+  // 新規作成
+  if (!CURRENT.id) {
+    setBusy(true);
+    google.script.run
+      .withSuccessHandler(function (res) {
+        setBusy(false);
+        if (res.ok) { closeModal(); toast('新規カードを作成しました'); loadBoard(); }
+        else { showError([res.message || '作成に失敗しました']); }
+      })
+      .withFailureHandler(function (e) { setBusy(false); showError([e.message || String(e)]); })
+      .createCard(data);
+    return;
+  }
+
+  // クライアント側の事前チェック（最終判定はサーバー）
+  var merged = Object.assign({}, CURRENT, data);
+  var reqKeys = requiredKeysFor(target, merged);
+  var missing = reqKeys.filter(function (k) {
+    var v = merged[k];
+    return v === undefined || v === null || String(v).trim() === '';
+  });
+  if (missing.length > 0) {
+    markMissing(missing);
+    showError(missing.map(function (k) { return STATE.meta.fieldLabels[k] || k; }));
+    return;
+  }
+
+  setBusy(true);
+  google.script.run
+    .withSuccessHandler(function (res) {
+      setBusy(false);
+      if (res.ok) {
+        closeModal();
+        toast('「' + statusLabel(target) + '」へ移動しました');
+        loadBoard();
+      } else if (res.missing) {
+        showError(res.missing);
+      } else {
+        showError([res.message || '移動できませんでした']);
+      }
+    })
+    .withFailureHandler(function (e) { setBusy(false); showError([e.message || String(e)]); })
+    .moveCard(CURRENT.id, target, data);
+}
+
+function markMissing(keys) {
+  document.querySelectorAll('.field.missing').forEach(function (n) { n.classList.remove('missing'); });
+  keys.forEach(function (k) {
+    var fld = findCheckField(k);
+    if (fld) fld.classList.add('missing');
+  });
+}
+
+function showError(labelsOrKeys) {
+  var box = document.getElementById('errbox');
+  var items = labelsOrKeys.map(function (x) {
+    return STATE.meta.fieldLabels[x] ? STATE.meta.fieldLabels[x] : x;
+  });
+  box.innerHTML = '<b>移動できません。次の必須項目が未入力です：</b>' + escapeHtml(items.join('、'));
+  box.classList.add('show');
+}
+function hideError() { document.getElementById('errbox').classList.remove('show'); }
+
+function closeModal() { toggle('overlay', false); CURRENT = null; }
+
+function setBusy(b) { document.getElementById('modalSave').disabled = b; }
+
+/* ---------- アーカイブ ---------- */
+function openArchive() {
+  document.getElementById('archQuery').value = '';
+  document.getElementById('archList').innerHTML =
+    '<div class="empty">検索条件を入力してください（空欄で全件）。</div>';
+  toggle('archOverlay', true);
+}
+
+function doArchiveSearch() {
+  var q = document.getElementById('archQuery').value;
+  var list = document.getElementById('archList');
+  list.innerHTML = '<div class="empty">検索中…</div>';
+  google.script.run
+    .withSuccessHandler(function (rows) { renderArchive(rows); })
+    .withFailureHandler(function (e) { list.innerHTML = '<div class="empty">エラー: ' + escapeHtml(e.message || e) + '</div>'; })
+    .searchArchive(q);
+}
+
+function renderArchive(rows) {
+  var list = document.getElementById('archList');
+  if (!rows || rows.length === 0) {
+    list.innerHTML = '<div class="empty">該当するアーカイブはありません。</div>';
+    return;
+  }
+  list.innerHTML = '';
+  rows.forEach(function (r) {
+    var row = document.createElement('div');
+    row.className = 'arch-row';
+    row.innerHTML =
+      '<div><div>' + escapeHtml(r.name || '(名前未入力)') + '</div>' +
+      '<div class="a-meta">' + escapeHtml(r.parentEmail || '') +
+      (r.country ? '｜' + escapeHtml(r.country) : '') +
+      (r.archivedAt ? '｜アーカイブ ' + escapeHtml(r.archivedAt) : '') + '</div></div>' +
+      '<div class="spacer"></div>' +
+      '<button class="btn btn-primary">パイプラインに戻す</button>';
+    row.querySelector('button').onclick = function () { restoreArchive(r.id, this); };
+    list.appendChild(row);
+  });
+}
+
+function restoreArchive(id, btn) {
+  btn.disabled = true; btn.textContent = '処理中…';
+  google.script.run
+    .withSuccessHandler(function (res) {
+      if (res.ok) { toast('ロスト列に戻しました'); doArchiveSearch(); loadBoard(); }
+      else { toast(res.message || '失敗しました', true); btn.disabled = false; btn.textContent = 'パイプラインに戻す'; }
+    })
+    .withFailureHandler(function (e) { toast(e.message || String(e), true); btn.disabled = false; btn.textContent = 'パイプラインに戻す'; })
+    .restoreFromArchive(id);
+}
+
+/* ---------- ユーティリティ ---------- */
+function statusLabel(id) {
+  for (var i = 0; i < STATE.statuses.length; i++)
+    if (STATE.statuses[i].id === id) return STATE.statuses[i].no + ' ' + STATE.statuses[i].name;
+  return id;
+}
+function toggle(id, on) { document.getElementById(id).classList.toggle('open', !!on); }
+function toast(msg, isErr) {
+  var t = document.getElementById('toast');
+  t.textContent = msg; t.className = 'toast show' + (isErr ? ' err' : '');
+  setTimeout(function () { t.className = 'toast'; }, 2600);
+}
+function escapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+function escapeAttr(s) { return escapeHtml(s); }
+</script>

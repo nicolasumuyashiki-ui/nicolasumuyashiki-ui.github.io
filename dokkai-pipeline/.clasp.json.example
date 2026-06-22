@@ -1,0 +1,5 @@
+{
+  "_comment": "これは clasp 用のテンプレートです。clasp を使う場合のみ、このファイルを '.clasp.json' にコピーし、<SCRIPT_ID> を実際のスクリプトIDに置き換えてください。コピペ方式(SETUP.md の A)では不要です。",
+  "scriptId": "<SCRIPT_ID>",
+  "rootDir": "."
+}

@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <?!= include('Styles'); ?>
+</head>
+<body>
+  <div class="topbar">
+    <h1>多読パイプライン</h1>
+    <div class="spacer"></div>
+    <button class="btn" id="btnArchive">🗄 アーカイブ検索</button>
+    <button class="btn" id="btnNew">＋ 新規</button>
+    <button class="btn btn-ghost" id="btnReload" title="再読み込み">⟳</button>
+  </div>
+
+  <div id="board" class="board">
+    <div class="loading">読み込み中…</div>
+  </div>
+
+  <!-- 移動 / 編集モーダル -->
+  <div class="overlay" id="overlay">
+    <div class="modal" role="dialog" aria-modal="true">
+      <div class="modal-head">
+        <h2 id="modalTitle">カード</h2>
+        <button class="btn btn-ghost x" id="modalClose">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="target-select">
+          <span class="cur" id="curStatus">現在: -</span>
+          <span>→ 移動先</span>
+          <select id="targetStatus"></select>
+        </div>
+        <div class="errbox" id="errbox"></div>
+        <div id="formFields"><!-- JSで生成 --></div>
+      </div>
+      <div class="modal-foot">
+        <div class="spacer"></div>
+        <button class="btn" id="modalCancel">キャンセル</button>
+        <button class="btn btn-primary" id="modalSave">保存して移動</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- アーカイブモーダル -->
+  <div class="overlay" id="archOverlay">
+    <div class="modal">
+      <div class="modal-head">
+        <h2>🗄 アーカイブ検索</h2>
+        <button class="btn btn-ghost x" id="archClose">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="row" style="margin-bottom:12px;">
+          <div class="field" style="flex:1;margin:0;">
+            <input type="text" id="archQuery" placeholder="氏名・保護者Email・居住国で検索">
+          </div>
+          <button class="btn btn-primary" id="archSearch">検索</button>
+        </div>
+        <div class="archive-list" id="archList">
+          <div class="empty">検索条件を入力してください（空欄で全件）。</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <?!= include('JavaScript'); ?>
+</body>
+</html>
