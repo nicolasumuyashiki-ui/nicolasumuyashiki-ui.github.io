@@ -122,29 +122,76 @@ clasp push   # ローカルの .gs / .html / appsscript.json をアップロー�
 
 ---
 
-## D. フォーム自動流入（HubSpot 連携）について 〔保留中〕
+## D. フォーム自動流入（HubSpot 連携）
 
-HubSpot の **体験申込フォーム / 成約フォーム** の連携先リンクは
-**後日ニコから共有**されます。それまでは、受信口（`doPost`）と合言葉認証
-（`FORM_SECRET`）だけ準備済みです。
+### D-0. 対象フォーム（ニコ共有・3種）
 
-リンク受領後、HubSpot 側の Workflow（または Zapier 等）から
-**Webアプリの `/exec` URL** に対して、次の JSON を POST するよう設定します。
+| フォーム | 用途 | 送る `type` | 反映先 |
+|---|---|---|---|
+| 体験申し込みフォーム<br>`https://40iizu.share-na2.hsforms.com/2Agxzyh3YQXyiMgT9PjK6SQ` | お問い合わせ | `inquiry` | ①面談未実施 に新規カード |
+| ※夏休み限定 成約フォーム<br>`https://40iizu.share-na2.hsforms.com/2N_eoPnYsSRO45uTDArWgNw` | 成約 | `contract` | ⑦成約（保護者Emailで突合） |
+| ※通常プラン 成約フォーム<br>`https://40iizu.share-na2.hsforms.com/2PcY7cwLmS-aTA34LEsKWmw` | 成約 | `contract` | ⑦成約（保護者Emailで突合） |
+
+> 上の URL は **HubSpot のフォーム公開ページ**（回答者が入力する画面）です。
+> パイプラインへ自動反映するには、HubSpot 側で「フォーム送信時に、本ツールの
+> Webアプリ URL（`/exec`）へ Webhook を飛ばす」設定を **1フォームにつき1つ** 作ります（下記 D-1）。
+
+### D-1. HubSpot 側の設定（フォーム → 本ツールへ Webhook）
+
+各フォームについて、HubSpot の **ワークフロー（Workflow）** を作成します。
+
+1. HubSpot → **自動化 → ワークフロー → 作成 →「フォーム送信を基準にする」**。
+2. 登録トリガー：対象フォーム（例：体験申し込みフォーム）の送信。
+3. アクション追加 → **「Webhook」**（Operations Hub が必要。無い場合は末尾の代替案へ）。
+   - メソッド：**POST**
+   - Webhook URL：本ツールの Webアプリ URL に `?secret=（FORM_SECRETの値）` を付けたもの
+     例：`https://script.google.com/macros/s/XXXX/exec?secret=あなたの合言葉`
+   - 送信プロパティ：下表のキー名で、フォーム項目をマッピング。
+4. 体験申し込みフォームのワークフローには、本文（プロパティ）に **`type` = `inquiry`** を、
+   成約フォーム2種には **`type` = `contract`** を必ず含めます
+   （`?secret=` を使う場合でも `type` は本文に必要です）。
+5. 公開（オン）にする。
+
+> 💡 `?secret=` を使わず、本文（body）に `secret` を入れてもOKです。どちらでも認証できます。
+
+### D-2. 本ツールが受け取る JSON の形
 
 - お問い合わせ → ①面談未実施 に自動追加：
   ```json
   { "secret": "FORM_SECRETの値", "type": "inquiry",
     "name": "山田花子", "parentEmail": "oya@example.com", "country": "日本" }
   ```
-- 成約 → ⑦成約 に自動移動（保護者Emailで突合、無ければ新規作成）：
+- 成約 → ⑦成約 に自動移動（`parentEmail` で既存カードと突合。無ければ新規作成して⑦へ）：
   ```json
   { "secret": "FORM_SECRETの値", "type": "contract",
     "parentEmail": "oya@example.com" }
   ```
 
-> `secret` は URL の `?secret=...` でも、本文（body）内でもどちらでも認証できます。
-> **合言葉が一致しないリクエストは拒否**されます。
-> HubSpot 側の具体的な設定手順は、リンク受領後にこの SETUP.md へ追記します。
+送れるキー（任意・あるものだけでOK）：
+`name` `intakeName` `grade` `country` `parentEmail` `otherEmail` `staff`
+`meetingDate` `reason` `level` `notes` `trialDate` `trialTime`
+
+> `secret` は URL の `?secret=...` でも本文内でもOK。**合言葉が一致しないリクエストは拒否**されます。
+> 成約フォームは「夏休み限定／通常プラン」のどちらも `type:"contract"` で同じ⑦へ入ります。
+> プラン名を残したい場合は `notes` に入れて送ってください。
+
+### D-3. Operations Hub が無い場合（代替）
+
+HubSpot の Webhook アクションは Operations Hub が必要です。無い場合は、
+**Zapier / Make** の「HubSpot: New Form Submission」→「Webhooks: POST」で、
+上記と同じ URL・JSON を送れば同じように連携できます。
+
+### D-4. 連携テスト
+
+設定前でも、ターミナルから疎通確認できます（`FORM_SECRET` と URL は自分のものに置換）：
+
+```bash
+curl -L -X POST "https://script.google.com/macros/s/XXXX/exec" \
+  -H "Content-Type: application/json" \
+  -d '{"secret":"あなたの合言葉","type":"inquiry","name":"テスト 花子","parentEmail":"test@example.com"}'
+```
+
+`{"ok":true,...}` が返り、①列にカードが増えれば成功です。
 
 ---
 

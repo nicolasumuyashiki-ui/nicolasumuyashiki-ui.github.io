@@ -7,58 +7,42 @@
 </head>
 <body>
   <div class="topbar">
-    <h1>多読パイプライン</h1>
+    <div class="brand"><span class="dot"></span>多読講座パイプライン <small>セールスパイプライン</small></div>
     <div class="spacer"></div>
-    <button class="btn" id="btnArchive">🗄 アーカイブ検索</button>
-    <button class="btn" id="btnNew">＋ 新規</button>
-    <button class="btn btn-ghost" id="btnReload" title="再読み込み">⟳</button>
+    <button id="addBtn" class="primary">＋ お問い合わせ追加</button>
+    <button id="arcBtn" class="ghost">🗄 アーカイブ検索</button>
+    <button id="reloadBtn" class="ghost" title="再読み込み">⟳</button>
   </div>
 
-  <div id="board" class="board">
-    <div class="loading">読み込み中…</div>
-  </div>
+  <div class="board" id="board"><div class="loading">読み込み中…</div></div>
 
   <!-- 移動 / 編集モーダル -->
-  <div class="overlay" id="overlay">
-    <div class="modal" role="dialog" aria-modal="true">
-      <div class="modal-head">
-        <h2 id="modalTitle">カード</h2>
-        <button class="btn btn-ghost x" id="modalClose">✕</button>
-      </div>
-      <div class="modal-body">
-        <div class="target-select">
-          <span class="cur" id="curStatus">現在: -</span>
-          <span>→ 移動先</span>
-          <select id="targetStatus"></select>
+  <div class="ov" id="ov">
+    <div class="modal">
+      <div class="m-h">
+        <div>
+          <div class="t" id="mTitle">顧客</div>
+          <div class="sub" id="mSub"></div>
         </div>
-        <div class="errbox" id="errbox"></div>
-        <div id="formFields"><!-- JSで生成 --></div>
+        <div class="spacer" style="flex:1"></div>
+        <button class="ghost" id="mClose" style="font-size:18px;padding:2px 9px">×</button>
       </div>
-      <div class="modal-foot">
-        <div class="spacer"></div>
-        <button class="btn" id="modalCancel">キャンセル</button>
-        <button class="btn btn-primary" id="modalSave">保存して移動</button>
+      <div class="m-b" id="mBody"></div>
+      <div class="m-f">
+        <button class="danger" id="mDelete" style="margin-right:auto">削除</button>
+        <button class="ghost" id="mCancel">キャンセル</button>
+        <button class="primary" id="mSave">保存して移動</button>
       </div>
     </div>
   </div>
 
-  <!-- アーカイブモーダル -->
-  <div class="overlay" id="archOverlay">
+  <!-- アーカイブ -->
+  <div class="ov" id="arcOv">
     <div class="modal">
-      <div class="modal-head">
-        <h2>🗄 アーカイブ検索</h2>
-        <button class="btn btn-ghost x" id="archClose">✕</button>
-      </div>
-      <div class="modal-body">
-        <div class="row" style="margin-bottom:12px;">
-          <div class="field" style="flex:1;margin:0;">
-            <input type="text" id="archQuery" placeholder="氏名・保護者Email・居住国で検索">
-          </div>
-          <button class="btn btn-primary" id="archSearch">検索</button>
-        </div>
-        <div class="archive-list" id="archList">
-          <div class="empty">検索条件を入力してください（空欄で全件）。</div>
-        </div>
+      <div class="m-h"><div class="t">🗄 アーカイブ検索</div><div class="spacer" style="flex:1"></div><button class="ghost" id="arcClose" style="font-size:18px;padding:2px 9px">×</button></div>
+      <div class="m-b">
+        <input id="arcSearch" placeholder="氏名・保護者Email・居住国で検索…" style="margin-bottom:12px">
+        <div id="arcList"></div>
       </div>
     </div>
   </div>

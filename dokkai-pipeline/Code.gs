@@ -25,8 +25,8 @@ var SHEET_CONFIG    = 'config';
  */
 var COLUMNS = [
   'id', 'status',
-  'name', 'grade', 'country', 'parentEmail', 'otherEmail', 'staff',
-  'meetingDate', 'reason', 'level', 'notes', 'trialDate',
+  'name', 'intakeName', 'grade', 'country', 'parentEmail', 'otherEmail', 'staff',
+  'meetingDate', 'reason', 'level', 'notes', 'trialDate', 'trialTime',
   'reminderSentDate', 'stagnationReason', 'stagnationOther', 'preMeetingLost',
   'createdAt', 'lostAt', 'archivedAt', 'history'
 ];
@@ -67,19 +67,22 @@ var LEVEL_OPTIONS = [
   'Violet', 'Rose', 'Red', 'Orange', 'Gold', 'Brown', 'Tan', 'Lime', 'Green'
 ];
 
-/** 停滞の理由 選択肢 */
-var STAGNATION_OPTIONS = ['1. 成約待ち', '2. これからもう一度リマインド予定', '3. その他（自由記入）'];
+/** 停滞の理由 選択肢（プロトタイプに準拠） */
+var STAGNATION_OPTIONS = ['1. 成約待ち', '2. これからもう一度リマインド予定', '3. その他'];
 
-/** 「その他」判定用キーワード */
-var STAGNATION_OTHER_KEY = 'その他';
+/** 「3. その他」が選ばれているか（記入欄を必須にするか）の判定 */
+function isStagnationOther_(reason) {
+  return String(reason || '').trim().charAt(0) === '3';
+}
 
 /** 項目ラベル（UI・通知・エラー表示で使用） */
 var FIELD_LABELS = {
   name: 'お名前', grade: '学年', country: '居住国', parentEmail: '保護者Email',
   otherEmail: 'その他Email', staff: '面談担当社員', meetingDate: '面談実施日',
   reason: 'お申込み理由', level: '開始レベル', notes: '特記事項', trialDate: '体験授業日程',
+  trialTime: '体験授業 時間',
   reminderSentDate: 'リマインド送信日', stagnationReason: '停滞の理由',
-  stagnationOther: '停滞理由(その他記入)', preMeetingLost: '面談前ロスト'
+  stagnationOther: '停滞理由(その他記入)', preMeetingLost: '面談前ロスト', intakeName: 'お問い合わせ者名'
 };
 
 /* ============================================================
@@ -238,9 +241,9 @@ function requiredKeysFor_(targetStatus, record) {
     return pre ? [] : BASE_REQUIRED.slice();
   }
   var keys = (REQUIRED_MAP[targetStatus] || []).slice();
-  // 「停滞の理由」で「その他」を選んだ場合は記入欄も必須
+  // 「停滞の理由」で「3. その他」を選んだ場合は記入欄も必須
   if (keys.indexOf('stagnationReason') !== -1 && record &&
-      String(record.stagnationReason || '').indexOf(STAGNATION_OTHER_KEY) !== -1) {
+      isStagnationOther_(record.stagnationReason)) {
     keys.push('stagnationOther');
   }
   return keys;
@@ -277,7 +280,6 @@ function getBoard() {
       gradeOptions: GRADE_OPTIONS,
       levelOptions: LEVEL_OPTIONS,
       stagnationOptions: STAGNATION_OPTIONS,
-      stagnationOtherKey: STAGNATION_OTHER_KEY,
       fieldLabels: FIELD_LABELS,
       requiredMap: REQUIRED_MAP,
       baseRequired: BASE_REQUIRED,
@@ -303,8 +305,8 @@ function moveCard(id, targetStatus, data) {
     if (!rec) return { ok: false, message: '対象のカードが見つかりませんでした。' };
 
     // 入力値をマージ（編集可能な項目のみ）
-    var editable = ['name', 'grade', 'country', 'parentEmail', 'otherEmail', 'staff',
-      'meetingDate', 'reason', 'level', 'notes', 'trialDate', 'reminderSentDate',
+    var editable = ['name', 'intakeName', 'grade', 'country', 'parentEmail', 'otherEmail', 'staff',
+      'meetingDate', 'reason', 'level', 'notes', 'trialDate', 'trialTime', 'reminderSentDate',
       'stagnationReason', 'stagnationOther', 'preMeetingLost'];
     if (data) {
       editable.forEach(function (k) {
@@ -339,8 +341,8 @@ function saveCard(id, data) {
     var rec = null;
     for (var i = 0; i < all.length; i++) { if (all[i].id === id) { rec = all[i]; break; } }
     if (!rec) return { ok: false, message: '対象のカードが見つかりませんでした。' };
-    var editable = ['name', 'grade', 'country', 'parentEmail', 'otherEmail', 'staff',
-      'meetingDate', 'reason', 'level', 'notes', 'trialDate', 'reminderSentDate',
+    var editable = ['name', 'intakeName', 'grade', 'country', 'parentEmail', 'otherEmail', 'staff',
+      'meetingDate', 'reason', 'level', 'notes', 'trialDate', 'trialTime', 'reminderSentDate',
       'stagnationReason', 'stagnationOther', 'preMeetingLost'];
     if (data) editable.forEach(function (k) {
       if (data.hasOwnProperty(k)) rec[k] = (k === 'preMeetingLost') ? !!data[k] : data[k];
@@ -359,13 +361,28 @@ function createCard(data) {
   lock.waitLock(20000);
   try {
     var rec = blankRecord_();
-    var editable = ['name', 'grade', 'country', 'parentEmail', 'otherEmail', 'staff',
-      'meetingDate', 'reason', 'level', 'notes', 'trialDate'];
+    var editable = ['name', 'intakeName', 'grade', 'country', 'parentEmail', 'otherEmail', 'staff',
+      'meetingDate', 'reason', 'level', 'notes', 'trialDate', 'trialTime'];
     if (data) editable.forEach(function (k) { if (data.hasOwnProperty(k)) rec[k] = data[k]; });
     rec.status = 's1';
     rec.history = JSON.stringify([{ at: nowIso_(), to: 's1', by: '手動作成' }]);
     appendRow_(SHEET_CUSTOMERS, rec);
     return { ok: true, record: rec };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** カードを削除（誤登録の除去用） */
+function deleteCard(id) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var all = readAll_(SHEET_CUSTOMERS);
+    for (var i = 0; i < all.length; i++) {
+      if (all[i].id === id) { deleteRow_(SHEET_CUSTOMERS, all[i]._row); return { ok: true }; }
+    }
+    return { ok: false, message: '対象のカードが見つかりませんでした。' };
   } finally {
     lock.releaseLock();
   }
@@ -660,8 +677,8 @@ function handleInquiry_(body) {
   try {
     ensureSheets_();
     var rec = blankRecord_();
-    ['name', 'grade', 'country', 'parentEmail', 'otherEmail', 'staff',
-     'meetingDate', 'reason', 'level', 'notes', 'trialDate'].forEach(function (k) {
+    ['name', 'intakeName', 'grade', 'country', 'parentEmail', 'otherEmail', 'staff',
+     'meetingDate', 'reason', 'level', 'notes', 'trialDate', 'trialTime'].forEach(function (k) {
       if (body[k] !== undefined && body[k] !== null) rec[k] = String(body[k]);
     });
     rec.status = 's1';
@@ -694,8 +711,8 @@ function handleContract_(body) {
     }
     // 突合先なし → 新規作成して⑦へ
     var nr = blankRecord_();
-    ['name', 'grade', 'country', 'parentEmail', 'otherEmail', 'staff',
-     'meetingDate', 'reason', 'level', 'notes', 'trialDate'].forEach(function (k) {
+    ['name', 'intakeName', 'grade', 'country', 'parentEmail', 'otherEmail', 'staff',
+     'meetingDate', 'reason', 'level', 'notes', 'trialDate', 'trialTime'].forEach(function (k) {
       if (body[k] !== undefined && body[k] !== null) nr[k] = String(body[k]);
     });
     nr.status = 's7';
